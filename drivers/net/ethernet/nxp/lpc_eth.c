@@ -56,7 +56,7 @@
 
 #define ENET_MAXF_SIZE 1536
 #define ENET_RX_DESC 48
-#define ENET_TX_DESC 16
+#define ENET_TX_DESC 32
 
 #define NAPI_WEIGHT 16
 
