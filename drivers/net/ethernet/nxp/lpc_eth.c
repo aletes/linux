@@ -52,7 +52,6 @@
 
 #define MODNAME "lpc-eth"
 #define DRV_VERSION "1.00"
-#define PHYDEF_ADDR 0x00
 
 #define ENET_MAXF_SIZE 1536
 #define ENET_RX_DESC 48
@@ -415,9 +414,6 @@ static bool use_iram_for_net(struct device *dev)
 #define TXDESC_CONTROL_CRC		(1 << 29)
 #define TXDESC_CONTROL_LAST		(1 << 30)
 #define TXDESC_CONTROL_INT		(1 << 31)
-
-static int lpc_eth_hard_start_xmit(struct sk_buff *skb,
-				   struct net_device *ndev);
 
 /*
  * Structure of a TX/RX descriptors and RX status
