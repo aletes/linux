@@ -432,6 +432,23 @@ static int usb_hcd_nxp_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_PM
+static int usb_hcd_suspend(struct platform_device *pdev, pm_message_t message)
+{
+	clk_disable(usb_clk);
+	return 0;
+}
+
+static int usb_hcd_resume(struct platform_device *pdev)
+{
+	struct usb_hcd *hcd = platform_get_drvdata(pdev);
+
+	clk_enable(usb_clk);
+	ohci_finish_controller_resume(hcd);
+	return 0;
+}
+#endif
+
 /* work with hotplug and coldplug */
 MODULE_ALIAS("platform:usb-ohci");
 
@@ -451,5 +468,9 @@ static struct platform_driver usb_hcd_nxp_driver = {
 	},
 	.probe = usb_hcd_nxp_probe,
 	.remove = usb_hcd_nxp_remove,
+#ifdef CONFIG_PM
+	.suspend = usb_hcd_suspend,
+	.resume = usb_hcd_resume,
+#endif
 };
 
