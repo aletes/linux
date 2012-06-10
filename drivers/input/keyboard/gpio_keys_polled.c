@@ -25,6 +25,8 @@
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/gpio_keys.h>
+#include <linux/of_platform.h>
+#include <linux/of_gpio.h>
 
 #define DRV_NAME	"gpio-keys-polled"
 
@@ -38,7 +40,7 @@ struct gpio_keys_button_data {
 struct gpio_keys_polled_dev {
 	struct input_polled_dev *poll_dev;
 	struct device *dev;
-	struct gpio_keys_platform_data *pdata;
+	struct gpio_keys_platform_data pdata;
 	struct gpio_keys_button_data data[0];
 };
 
@@ -67,11 +69,11 @@ static void gpio_keys_polled_check_state(struct input_dev *input,
 static void gpio_keys_polled_poll(struct input_polled_dev *dev)
 {
 	struct gpio_keys_polled_dev *bdev = dev->private;
-	struct gpio_keys_platform_data *pdata = bdev->pdata;
+	struct gpio_keys_platform_data *pdata = &bdev->pdata;
 	struct input_dev *input = dev->input;
 	int i;
 
-	for (i = 0; i < bdev->pdata->nbuttons; i++) {
+	for (i = 0; i < pdata->nbuttons; i++) {
 		struct gpio_keys_button_data *bdata = &bdev->data[i];
 
 		if (bdata->count < bdata->threshold)
@@ -85,7 +87,7 @@ static void gpio_keys_polled_poll(struct input_polled_dev *dev)
 static void gpio_keys_polled_open(struct input_polled_dev *dev)
 {
 	struct gpio_keys_polled_dev *bdev = dev->private;
-	struct gpio_keys_platform_data *pdata = bdev->pdata;
+	struct gpio_keys_platform_data *pdata = &bdev->pdata;
 
 	if (pdata->enable)
 		pdata->enable(bdev->dev);
@@ -94,31 +96,125 @@ static void gpio_keys_polled_open(struct input_polled_dev *dev)
 static void gpio_keys_polled_close(struct input_polled_dev *dev)
 {
 	struct gpio_keys_polled_dev *bdev = dev->private;
-	struct gpio_keys_platform_data *pdata = bdev->pdata;
+	struct gpio_keys_platform_data *pdata = &bdev->pdata;
 
 	if (pdata->disable)
 		pdata->disable(bdev->dev);
 }
+#ifdef CONFIG_OF
+static int gpio_keys_polled_get_devtree_pdata(struct device *dev,
+			    struct gpio_keys_platform_data *pdata)
+{
+	struct device_node *node, *pp;
+	int i;
+	struct gpio_keys_button *buttons;
+
+	node = dev->of_node;
+	if (node == NULL)
+		return -ENODEV;
+
+	memset(pdata, 0, sizeof(*pdata));
+
+	pdata->rep = !!of_get_property(node, "autorepeat", NULL);
+
+	of_property_read_u32(node, "poll-interval", &pdata->poll_interval);
+
+	pdata->nbuttons = of_get_child_count(node);
+	if (pdata->nbuttons == 0)
+		return -ENODEV;
+
+	buttons = kzalloc(pdata->nbuttons * (sizeof *buttons), GFP_KERNEL);
+	if (!buttons)
+		return -ENOMEM;
+
+	i = 0;
+	for_each_child_of_node(node, pp) {
+		enum of_gpio_flags flags;
+
+		if (!of_find_property(pp, "gpios", NULL)) {
+			pdata->nbuttons--;
+			dev_warn(dev, "Found button without gpios\n");
+			continue;
+		}
+		buttons[i].gpio = of_get_gpio_flags(pp, 0, &flags);
+		buttons[i].active_low = flags & OF_GPIO_ACTIVE_LOW;
+
+		if (of_property_read_u32(pp, "linux,code", &buttons[i].code)) {
+			dev_err(dev, "Button without keycode: 0x%x\n",
+				buttons[i].gpio);
+			goto out_fail;
+		}
+
+		buttons[i].desc = of_get_property(pp, "label", NULL);
+
+		if (of_property_read_u32(pp, "linux,input-type",
+			&buttons[i].type))
+			buttons[i].type = EV_KEY;
+
+		buttons[i].wakeup = !!of_get_property(pp, "gpio-key,wakeup",
+			NULL);
+
+		if (of_property_read_u32(pp, "debounce-interval",
+			&buttons[i].debounce_interval))
+			buttons[i].debounce_interval = 5;
+
+		i++;
+	}
+
+	pdata->buttons = buttons;
+
+	return 0;
+
+out_fail:
+	kfree(buttons);
+	return -ENODEV;
+}
+
+static struct of_device_id gpio_keys_polled_of_match[] = {
+	{ .compatible = "gpio-keys-polled", },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, gpio_keys_polled_of_match);
+
+#else
+
+static int gpio_keys_polled_get_devtree_pdata(struct device *dev,
+			    struct gpio_keys_platform_data *altp)
+{
+	return -ENODEV;
+}
+#endif
 
 static int __devinit gpio_keys_polled_probe(struct platform_device *pdev)
 {
 	struct gpio_keys_platform_data *pdata = pdev->dev.platform_data;
 	struct device *dev = &pdev->dev;
+	struct gpio_keys_platform_data alt_pdata;
 	struct gpio_keys_polled_dev *bdev;
 	struct input_polled_dev *poll_dev;
 	struct input_dev *input;
 	int error;
 	int i;
 
-	if (!pdata || !pdata->poll_interval)
-		return -EINVAL;
+	if (!pdata) {
+		error = gpio_keys_polled_get_devtree_pdata(dev, &alt_pdata);
+		if (error)
+			return error;
+		pdata = &alt_pdata;
+	}
+
+	if (!pdata->poll_interval) {
+		error = -EINVAL;
+		goto err_free_buttons;
+	}
 
 	bdev = kzalloc(sizeof(struct gpio_keys_polled_dev) +
 		       pdata->nbuttons * sizeof(struct gpio_keys_button_data),
 		       GFP_KERNEL);
 	if (!bdev) {
 		dev_err(dev, "no memory for private data\n");
-		return -ENOMEM;
+		error = -ENOMEM;
+		goto err_free_buttons;
 	}
 
 	poll_dev = input_allocate_polled_device();
@@ -184,7 +280,7 @@ static int __devinit gpio_keys_polled_probe(struct platform_device *pdev)
 
 	bdev->poll_dev = poll_dev;
 	bdev->dev = dev;
-	bdev->pdata = pdata;
+	bdev->pdata = *pdata;
 	platform_set_drvdata(pdev, bdev);
 
 	error = input_register_polled_device(poll_dev);
@@ -209,15 +305,19 @@ err_free_gpio:
 
 err_free_bdev:
 	kfree(bdev);
-
 	platform_set_drvdata(pdev, NULL);
+
+err_free_buttons:
+	/* If we have no platform_data, we allocated buttons dynamically. */
+	if (!pdev->dev.platform_data)
+		kfree(pdata->buttons);
 	return error;
 }
 
 static int __devexit gpio_keys_polled_remove(struct platform_device *pdev)
 {
 	struct gpio_keys_polled_dev *bdev = platform_get_drvdata(pdev);
-	struct gpio_keys_platform_data *pdata = bdev->pdata;
+	struct gpio_keys_platform_data *pdata = &bdev->pdata;
 	int i;
 
 	input_unregister_polled_device(bdev->poll_dev);
@@ -226,6 +326,14 @@ static int __devexit gpio_keys_polled_remove(struct platform_device *pdev)
 		gpio_free(pdata->buttons[i].gpio);
 
 	input_free_polled_device(bdev->poll_dev);
+
+	/*
+	 * If we had no platform_data, we allocated buttons dynamically, and
+	 * must free them here. pdata->buttons is the pointer to the
+	 * beginning of the allocated array.
+	 */
+	if (!pdev->dev.platform_data)
+		kfree(pdata->buttons);
 
 	kfree(bdev);
 	platform_set_drvdata(pdev, NULL);
@@ -239,6 +347,7 @@ static struct platform_driver gpio_keys_polled_driver = {
 	.driver	= {
 		.name	= DRV_NAME,
 		.owner	= THIS_MODULE,
+		.of_match_table = of_match_ptr(gpio_keys_polled_of_match),
 	},
 };
 module_platform_driver(gpio_keys_polled_driver);
