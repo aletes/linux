@@ -72,7 +72,8 @@ static struct i2c_client *isp1301_i2c_client;
 
 extern int usb_disabled(void);
 
-static struct clk *usb_clk;
+static struct clk *usb_pll_clk;
+static struct clk *usb_dev_clk;
 
 static void isp1301_configure_pnx4008(void)
 {
@@ -330,26 +331,40 @@ static int __devinit usb_hcd_nxp_probe(struct platform_device *pdev)
 	isp1301_configure();
 
 	/* Enable USB PLL */
-	usb_clk = clk_get(&pdev->dev, "ck_pll5");
-	if (IS_ERR(usb_clk)) {
+	usb_pll_clk = clk_get(&pdev->dev, "ck_pll5");
+	if (IS_ERR(usb_pll_clk)) {
 		dev_err(&pdev->dev, "failed to acquire USB PLL\n");
-		ret = PTR_ERR(usb_clk);
+		ret = PTR_ERR(usb_pll_clk);
 		goto out1;
 	}
 
-	ret = clk_enable(usb_clk);
+	ret = clk_enable(usb_pll_clk);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to start USB PLL\n");
 		goto out2;
 	}
 
-	ret = clk_set_rate(usb_clk, 48000);
+	ret = clk_set_rate(usb_pll_clk, 48000);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to set USB clock rate\n");
 		goto out3;
 	}
 
 	__raw_writel(__raw_readl(USB_CTRL) | USB_HOST_NEED_CLK_EN, USB_CTRL);
+
+	/* Enable USB device clock */
+	usb_dev_clk = clk_get(&pdev->dev, "ck_usbd");
+	if (IS_ERR(usb_dev_clk)) {
+		dev_err(&pdev->dev, "failed to acquire USB DEV Clock\n");
+		ret = PTR_ERR(usb_dev_clk);
+		goto out4;
+	}
+
+	ret = clk_enable(usb_dev_clk);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to start USB DEV Clock\n");
+		goto out5;
+	}
 
 	/* Set to enable all needed USB clocks */
 	__raw_writel(USB_CLOCK_MASK, USB_OTG_CLK_CTRL);
@@ -361,7 +376,7 @@ static int __devinit usb_hcd_nxp_probe(struct platform_device *pdev)
 	if (!hcd) {
 		dev_err(&pdev->dev, "Failed to allocate HC buffer\n");
 		ret = -ENOMEM;
-		goto out3;
+		goto out6;
 	}
 
 	/* Set all USB bits in the Start Enable register */
@@ -371,14 +386,14 @@ static int __devinit usb_hcd_nxp_probe(struct platform_device *pdev)
 	if (!res) {
 		dev_err(&pdev->dev, "Failed to get MEM resource\n");
 		ret =  -ENOMEM;
-		goto out4;
+		goto out6;
 	}
 
 	hcd->regs = devm_request_and_ioremap(&pdev->dev, res);
 	if (!hcd->regs) {
 		dev_err(&pdev->dev, "Failed to devm_request_and_ioremap\n");
 		ret =  -ENOMEM;
-		goto out4;
+		goto out6;
 	}
 	hcd->rsrc_start = res->start;
 	hcd->rsrc_len = resource_size(res);
@@ -386,7 +401,7 @@ static int __devinit usb_hcd_nxp_probe(struct platform_device *pdev)
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
 		ret = -ENXIO;
-		goto out4;
+		goto out6;
 	}
 
 	nxp_start_hc();
@@ -400,13 +415,17 @@ static int __devinit usb_hcd_nxp_probe(struct platform_device *pdev)
 		return ret;
 
 	nxp_stop_hc();
-out4:
+out6:
 	nxp_unset_usb_bits();
 	usb_put_hcd(hcd);
+out5:
+	clk_disable(usb_dev_clk);
+out4:
+	clk_put(usb_dev_clk);
 out3:
-	clk_disable(usb_clk);
+	clk_disable(usb_pll_clk);
 out2:
-	clk_put(usb_clk);
+	clk_put(usb_pll_clk);
 out1:
 	isp1301_i2c_client = NULL;
 out:
@@ -422,8 +441,10 @@ static int usb_hcd_nxp_remove(struct platform_device *pdev)
 	release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
 	usb_put_hcd(hcd);
 	nxp_unset_usb_bits();
-	clk_disable(usb_clk);
-	clk_put(usb_clk);
+	clk_disable(usb_pll_clk);
+	clk_put(usb_pll_clk);
+	clk_disable(usb_dev_clk);
+	clk_put(usb_dev_clk);
 	i2c_unregister_device(isp1301_i2c_client);
 	isp1301_i2c_client = NULL;
 
