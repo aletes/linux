@@ -739,9 +739,23 @@ static struct clk clk_rtc = {
 	.get_rate	= local_return_parent_rate,
 };
 
+static int local_usb_enable(struct clk *clk, int enable)
+{
+	u32 tmp;
+
+	if (enable) {
+		/* Set up I2C pull levels */
+		tmp = __raw_readl(LPC32XX_CLKPWR_I2C_CLK_CTRL);
+		tmp |= LPC32XX_CLKPWR_I2CCLK_USBI2CHI_DRIVE;
+		__raw_writel(tmp, LPC32XX_CLKPWR_I2C_CLK_CTRL);
+	}
+
+	return local_onoff_enable(clk, enable);
+}
+
 static struct clk clk_usbd = {
 	.parent		= &clk_usbpll,
-	.enable		= local_onoff_enable,
+	.enable		= local_usb_enable,
 	.enable_reg	= LPC32XX_CLKPWR_USB_CTRL,
 	.enable_mask	= LPC32XX_CLKPWR_USBCTRL_HCLK_EN,
 	.get_rate	= local_return_parent_rate,
