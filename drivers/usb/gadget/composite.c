@@ -17,6 +17,7 @@
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/utsname.h>
+#include <linux/of.h>
 
 #include <linux/usb/composite.h>
 #include <asm/unaligned.h>
@@ -1422,10 +1423,44 @@ static u8 override_id(struct usb_composite_dev *cdev, u8 *desc)
 	return *desc;
 }
 
+static void composite_parse_dt(struct usb_composite_dev *cdev,
+	struct device_node *np)
+{
+	u32 reg;
+
+	if (!idVendor && of_property_read_u32(np, "vendor-id", &reg) == 0)
+		idVendor = reg;
+
+	if (!idProduct && of_property_read_u32(np, "product-id", &reg) == 0)
+		idProduct = reg;
+
+	if (!bcdDevice && of_property_read_u32(np, "release", &reg) == 0)
+		bcdDevice = reg;
+
+	if (!iManufacturer)
+		if (of_property_read_string(np, "vendor",
+			&composite->iManufacturer) == 0)
+			cdev->manufacturer_override = override_id(cdev,
+				&cdev->desc.iManufacturer);
+
+	if (!iProduct)
+		if (of_property_read_string(np, "device",
+			&composite->iProduct) == 0)
+			cdev->product_override = override_id(cdev,
+				&cdev->desc.iProduct);
+
+	if (!iSerialNumber)
+		if (of_property_read_string(np, "serial",
+			&composite->iSerialNumber) == 0)
+			cdev->serial_override = override_id(cdev,
+				&cdev->desc.iSerialNumber);
+}
+
 static int composite_bind(struct usb_gadget *gadget)
 {
 	struct usb_composite_dev	*cdev;
 	int				status = -ENOMEM;
+	struct device_node		*np = gadget->dev.of_node;
 
 	cdev = kzalloc(sizeof *cdev, GFP_KERNEL);
 	if (!cdev)
@@ -1472,6 +1507,10 @@ static int composite_bind(struct usb_gadget *gadget)
 		goto fail;
 
 	cdev->desc = *composite->dev;
+
+	/* grab values from devicetree */
+	if (np)
+		composite_parse_dt(cdev, np);
 
 	/* standardized runtime overrides for device ID data */
 	if (idVendor)
