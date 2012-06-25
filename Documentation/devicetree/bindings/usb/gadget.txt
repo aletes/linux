@@ -1,0 +1,20 @@
+Usb Gadget DeviceTree bindings
+
+These optional properties inside the usb device controller node are used to
+change some of the gadget drivers configuration:
+- vendor-id: Usb vendor id
+- product-id: Usb product id
+- release: Version of this device
+- vendor: Textual description of the vendor
+- device: Textual description of this device
+- serial: Textual representation of the device's serial number
+
+Binding Example:
+	usbd@31020000 {
+		vendor-id = <0x0525>;
+		product-id = <0xa4a6>;
+		release = <1>;
+		vendor = "Some Corp";
+		device = "Test Device";
+		serial = "12345";
+	};
