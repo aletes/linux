@@ -548,22 +548,16 @@ static int gpio_keys_get_devtree_pdata(struct device *dev,
 	struct device_node *node, *pp;
 	int i;
 	struct gpio_keys_button *buttons;
-	u32 reg;
 
 	node = dev->of_node;
 	if (node == NULL)
 		return -ENODEV;
 
-	memset(pdata, 0, sizeof *pdata);
+	memset(pdata, 0, sizeof(*pdata));
 
 	pdata->rep = !!of_get_property(node, "autorepeat", NULL);
 
-	/* First count the subnodes */
-	pdata->nbuttons = 0;
-	pp = NULL;
-	while ((pp = of_get_next_child(node, pp)))
-		pdata->nbuttons++;
-
+	pdata->nbuttons = of_get_child_count(node);
 	if (pdata->nbuttons == 0)
 		return -ENODEV;
 
@@ -571,9 +565,8 @@ static int gpio_keys_get_devtree_pdata(struct device *dev,
 	if (!buttons)
 		return -ENOMEM;
 
-	pp = NULL;
 	i = 0;
-	while ((pp = of_get_next_child(node, pp))) {
+	for_each_child_of_node(node, pp) {
 		enum of_gpio_flags flags;
 
 		if (!of_find_property(pp, "gpios", NULL)) {
@@ -584,24 +577,21 @@ static int gpio_keys_get_devtree_pdata(struct device *dev,
 		buttons[i].gpio = of_get_gpio_flags(pp, 0, &flags);
 		buttons[i].active_low = flags & OF_GPIO_ACTIVE_LOW;
 
-		if (of_property_read_u32(pp, "linux,code", &reg)) {
+		if (of_property_read_u32(pp, "linux,code", &buttons[i].code)) {
 			dev_err(dev, "Button without keycode: 0x%x\n", buttons[i].gpio);
 			goto out_fail;
 		}
-		buttons[i].code = reg;
 
 		buttons[i].desc = of_get_property(pp, "label", NULL);
 
-		if (of_property_read_u32(pp, "linux,input-type", &reg) == 0)
-			buttons[i].type = reg;
-		else
+		if (of_property_read_u32(pp, "linux,input-type",
+			&buttons[i].type))
 			buttons[i].type = EV_KEY;
 
 		buttons[i].wakeup = !!of_get_property(pp, "gpio-key,wakeup", NULL);
 
-		if (of_property_read_u32(pp, "debounce-interval", &reg) == 0)
-			buttons[i].debounce_interval = reg;
-		else
+		if (of_property_read_u32(pp, "debounce-interval",
+			&buttons[i].debounce_interval))
 			buttons[i].debounce_interval = 5;
 
 		i++;
@@ -629,8 +619,6 @@ static int gpio_keys_get_devtree_pdata(struct device *dev,
 {
 	return -ENODEV;
 }
-
-#define gpio_keys_of_match NULL
 
 #endif
 
@@ -823,7 +811,7 @@ static struct platform_driver gpio_keys_device_driver = {
 		.name	= "gpio-keys",
 		.owner	= THIS_MODULE,
 		.pm	= &gpio_keys_pm_ops,
-		.of_match_table = gpio_keys_of_match,
+		.of_match_table = of_match_ptr(gpio_keys_of_match),
 	}
 };
 
