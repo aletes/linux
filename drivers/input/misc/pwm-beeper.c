@@ -171,6 +171,12 @@ static SIMPLE_DEV_PM_OPS(pwm_beeper_pm_ops,
 #define PWM_BEEPER_PM_OPS NULL
 #endif
 
+static const struct of_device_id pwm_beeper_dt_ids[] = {
+	{ .compatible = "pwm-beeper", },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, pwm_beeper_dt_ids);
+
 static struct platform_driver pwm_beeper_driver = {
 	.probe	= pwm_beeper_probe,
 	.remove = __devexit_p(pwm_beeper_remove),
@@ -178,6 +184,7 @@ static struct platform_driver pwm_beeper_driver = {
 		.name	= "pwm-beeper",
 		.owner	= THIS_MODULE,
 		.pm	= PWM_BEEPER_PM_OPS,
+		.of_match_table = of_match_ptr(pwm_beeper_dt_ids),
 	},
 };
 module_platform_driver(pwm_beeper_driver);
